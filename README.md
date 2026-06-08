@@ -125,7 +125,7 @@ Using the [NGC CLI](https://org.ngc.nvidia.com/setup/installers/cli):
 mkdir -p model
 
 ngc registry model download-version \
-  "nvidia/tao/grounding_dino:c" \
+  "nvidia/tao/grounding_dino:grounding_dino_swin_tiny_commercial_deployable_v1.0" \
   --dest model/
 ```
 
