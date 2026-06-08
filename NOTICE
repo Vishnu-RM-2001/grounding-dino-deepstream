@@ -1,0 +1,27 @@
+gdino-ds9-livetext — third-party components and licensing
+==========================================================
+
+The MIT license in LICENSE covers ONLY the source in this repository (the GDINO
+plugin libraries under src/, the ONNX surgery script, the configs, scripts, and
+the sample-app integrator). It does NOT cover the third-party components below,
+which you obtain yourself and which carry their own licenses.
+
+1. Grounding-DINO model (Swin-Tiny, commercial deployable)
+   Source : NVIDIA NGC / TAO
+            https://catalog.ngc.nvidia.com/orgs/nvidia/teams/tao/models/grounding_dino
+   License : NVIDIA model license shown on the NGC page. Review and accept it.
+   This repo does NOT include the model; you download it (see README).
+
+2. DeepStream SDK and the `deepstream-preprocess-test` sample app
+   Source : NVIDIA DeepStream 9.0 container / SDK.
+   License : NVIDIA proprietary (LicenseRef-NvidiaProprietary).
+   This repo does NOT include or redistribute any DeepStream/NVIDIA source.
+   app/integrate_sample_app.py reads the sample from YOUR installed DeepStream
+   tree and applies edits locally at build time. The NVIDIA sample source never
+   enters this repository.
+
+3. BERT vocabulary (assets/vocab.txt)
+   The standard `bert-base-uncased` WordPiece vocabulary (Apache-2.0, Google /
+   Hugging Face). Used by the tokenizer to match the model's text encoder.
+
+You are responsible for complying with each component's license.

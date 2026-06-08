@@ -1,0 +1,46 @@
+# nvdspreprocess config. Scales each frame to 960x544; the custom lib normalizes
+# the image and writes the current prompt's tokens into the packed fp32 tensor
+# "packed" that nvinfer consumes.
+[property]
+enable=1
+# must equal nvinfer gie-unique-id so the tensor is routed to it
+target-unique-ids=1
+# 2 = CUSTOM input order (our lib owns the layout)
+network-input-order=2
+unique-id=5
+gpu-id=0
+# GDINO image resolution (W x H)
+processing-width=960
+processing-height=544
+scaling-buf-pool-size=6
+tensor-buf-pool-size=6
+# packed flat tensor: 1 * 1633280 floats
+network-input-shape=1;1633280;1;1
+# 0=RGB 1=BGR 2=GRAY (scaling pool color; lib reads actual ch count at runtime)
+network-color-format=0
+# 0=FP32
+tensor-data-type=0
+tensor-name=packed
+# 2 = NVBUF_MEM_CUDA_DEVICE (nvinfer wants device input)
+scaling-pool-memory-type=2
+scaling-pool-compute-hw=0
+scaling-filter=1
+# GDINO was exported at fixed 544x960; keep AR off to match (see README note)
+maintain-aspect-ratio=0
+custom-lib-path=@@ROOT@@/build/libnvds_gdino_preprocess.so
+custom-tensor-preparation-function=CustomTensorPreparation
+
+[user-configs]
+vocab-path=@@ROOT@@/assets/vocab.txt
+prompt=car . man .
+fifo-path=/tmp/gdino_prompt
+mean=0.485,0.456,0.406
+std=0.229,0.224,0.225
+pixel-scale=255.0
+
+[group-0]
+src-ids=0
+process-on-roi=0
+# nvdspreprocess draws the ROI in green by default; with process-on-roi=0 that's
+# the whole frame, so turn it off (it's a debug overlay, not a detection).
+draw-roi=0

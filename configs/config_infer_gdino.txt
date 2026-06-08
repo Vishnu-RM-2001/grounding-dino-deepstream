@@ -1,0 +1,19 @@
+# nvinfer config: custom bbox parser (network-type=0). nvinfer runs inference and
+# calls NvDsInferParseCustomGDINO, which attaches the boxes. The engine must be
+# dynamic-batch (built by scripts/03_build_engine.sh).
+[property]
+gpu-id=0
+net-scale-factor=1.0
+model-engine-file=@@ROOT@@/onnx/gdino_single_input_fp16.engine
+network-type=0
+num-detected-classes=100
+cluster-mode=4
+parse-bbox-func-name=NvDsInferParseCustomGDINO
+custom-lib-path=@@ROOT@@/build/libnvds_gdino_parser.so
+output-blob-names=pred_logits;pred_boxes
+gie-unique-id=1
+batch-size=1
+process-mode=1
+
+[class-attrs-all]
+pre-cluster-threshold=0.1
