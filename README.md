@@ -91,36 +91,6 @@ handler), and builds it.
 
 ---
 
-## Repository layout
-
-```
-gdino-ds9-livetext/
-├── README.md
-├── src/                              # the three plugin libraries (built by the Makefile)
-│   ├── bert_tokenizer.*              #   WordPiece tokenizer
-│   ├── gdino_text.*                  #   GDINO text recipe + phrase spans
-│   ├── gdino_prompt_store.*          #   live-prompt store + control FIFO
-│   ├── normalize.*                   #   CUDA image-normalization kernel
-│   ├── gdino_preprocess.cpp          #   nvdspreprocess custom lib
-│   ├── gdino_decode.*                #   logits/boxes → detections (+ NMS)
-│   └── nvdsparse_gdino.cpp           #   nvinfer custom bbox parser
-├── onnx/build_single_input_onnx.py   # packs the 6 inputs into 1, in-graph
-├── configs/
-│   ├── config_preprocess_gdino.txt   # nvdspreprocess config (prompt, vocab, mean/std, FIFO)
-│   └── config_infer_gdino.txt        # nvinfer config (engine + custom parser)
-├── assets/vocab.txt                  # BERT vocabulary
-├── app/integrate_sample_app.py       # builds the app from NVIDIA's stock sample + our edits
-├── Makefile                          # builds the three plugin libraries
-├── scripts/                          # 01_build_libs · 02_make_onnx · 03_build_engine
-│                                     # 04_build_app · run.sh (use --live for a window)
-├── models/   (gitignored)            # the downloaded TAO model
-├── build/    (gitignored)            # compiled libs + app
-├── onnx/*.onnx, *.engine (gitignored)# generated ONNX + TensorRT engine
-└── out/      (gitignored)            # annotated results
-```
-
----
-
 ## Prerequisites
 
 **DeepStream 9.0 requirements** ([source](https://docs.nvidia.com/metropolis/deepstream/dev-guide/text/DS_Installation.html))
@@ -155,12 +125,9 @@ Using the [NGC CLI](https://org.ngc.nvidia.com/setup/installers/cli):
 mkdir -p model
 
 ngc registry model download-version \
-  "nvidia/tao/grounding_dino:grounding_dino_swin_tiny_commercial_deployable_v1.0" \
+  "nvidia/tao/grounding_dino:c" \
   --dest model/
 ```
-(or click **Download** on that page and unzip into `model/`). You'll get a
-`grounding_dino_swin_tiny_commercial_deployable.onnx` (~689 MB) under `model/` — note its
-path for step 2.
 
 ---
 
@@ -173,7 +140,7 @@ From the repo root. Steps 1–4 are a one-time setup; after that, `run.sh` is al
 ./scripts/01_build_libs.sh
 
 # 2) pack the model's 6 inputs into one  -> onnx/gdino_single_input.onnx
-./scripts/02_make_onnx.sh model/.../grounding_dino_swin_tiny_commercial_deployable.onnx
+./scripts/02_make_onnx.sh model/grounding_dinovgrounding_dino/grounding_dino_swin_tiny_commercial_deployable.onnx
 
 # 3) build the FP16 TensorRT engine  -> onnx/gdino_single_input_fp16.engine 
 ./scripts/03_build_engine.sh
@@ -184,8 +151,9 @@ From the repo root. Steps 1–4 are a one-time setup; after that, `run.sh` is al
 # run: detect cars and people, save an annotated MP4 -> out/gdino_out.mp4
 ./scripts/run.sh "car, man"
 ```
+Open `out/gdino_out.mp4`.
 
-Open `out/gdino_out.mp4`. To run on your own footage, pass a file URI:
+To run on your own footage, pass a file URI:
 ```bash
 ./scripts/run.sh "dog, bicycle" file:///path/to/your_video.mp4 out.mp4
 ```
@@ -250,13 +218,6 @@ plain `echo` from your host reaches the running pipeline.)
 ./scripts/run.sh "car, man" "" demo.mp4 "bus, bicycle"        # switches ~7s in
 ```
 
-**Prompt tips**
-- Separate phrases with **commas or periods** — `car, man` and `car . man .` are equivalent.
-- Use **`man`** for people; this model is weak on the literal word "person".
-- It's open-vocabulary — try anything: `forklift`, `red shirt`, `dog`, `traffic light`.
-- Scores around 0.3 are normal. The detection threshold is `GDINO_THR` (default `0.25`):
-  `GDINO_THR=0.4 ./scripts/run.sh "car"`.
-
 ---
 
 ## Configuration reference
@@ -294,8 +255,7 @@ Detection threshold is the `GDINO_THR` environment variable (default `0.25`), re
 ./scripts/run.sh "car, man" file:///path/to/your_video.mp4 out.mp4
 ```
 Put the file anywhere under the repo (it's mounted at `/work` in the container, so a file in
-`data/` is `file:///work/data/your_video.mp4`). Any container/codec `uridecodebin` can open
-works; H.264/H.265 are decoded by NVDEC. For an RTSP camera, pass
+`data/` is `file:///work/data/your_video.mp4`). For an RTSP camera, pass
 `rtsp://user:pass@host:554/stream` as the URI.
 
 ### Sample video
@@ -303,7 +263,7 @@ works; H.264/H.265 are decoded by NVDEC. For an RTSP camera, pass
 `run.sh` already defaults to a street-scene sample (`sample_720p.mp4`) that ships **inside**
 the DeepStream image, so `./scripts/run.sh "car, man"` just works with no input file.
 
-To pull that sample out to a local `data/` file (e.g. to inspect it or point other tools at it):
+To pull that sample out to a local `data/` file, use the following command:
 
 ```bash
 ./scripts/get_test_videos.sh
@@ -319,16 +279,11 @@ To pull that sample out to a local `data/` file (e.g. to inspect it or point oth
 
 ```bash
 ./scripts/run.sh --live "car, man"
-./scripts/run.sh --live "car, man" "" "bus, bicycle"      # + live switch ~7s in
 ```
 
 Requires an **X11 desktop session** (`echo $DISPLAY` is set). On Wayland, log into an
 "Xorg"/X11 session, or use `run.sh` to save an MP4 instead. The script grants the container
 X access via `xhost +local:root` and adds `--device /dev/dri`.
-
-> The model runs at ~27 FPS on an RTX 4060 — just above the 25 fps video. The **saved MP4 is
-> perfectly smooth**; the **live window can look slightly choppy** because it shows frames as
-> fast as the model produces them. That's the model's speed, not a bug.
 
 ---
 
