@@ -18,7 +18,7 @@ VIDEO=${2:-file:///opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.
 if [ "$LIVE" = 1 ]; then SWITCH=${3:-}; else OUT=${3:-out/gdino_out.mp4}; SWITCH=${4:-}; fi
 THR=${GDINO_THR:-0.25}
 
-[ -x build/gdino-preprocess-test ]       || { echo "ERROR: app missing — run 04_build_app.sh first.";   exit 1; }
+[ -x build/gdino-app ]                     || { echo "ERROR: app missing — run 04_build_app.sh first.";   exit 1; }
 [ -f onnx/gdino_single_input_fp16.engine ] || { echo "ERROR: engine missing — run 03_build_engine.sh first."; exit 1; }
 
 # Share the control FIFO between host and container (a container's /tmp is its
@@ -36,8 +36,8 @@ if [ "$LIVE" = 1 ]; then
   EXTRA+=(-e GDINO_SINK=nveglglessink -e DISPLAY="$DISPLAY" -v /tmp/.X11-unix:/tmp/.X11-unix)
   echo "prompt: '$PROMPT'${SWITCH:+   (live switch -> '$SWITCH')}   (window)"
 else
-  mkdir -p out/frames && rm -f out/frames/*.jpg
-  EXTRA+=(-e GDINO_OUT=/work/out/frames/ds_%05d.jpg)
+  mkdir -p "$(dirname "$OUT")"
+  EXTRA+=(-e GDINO_OUT=/work/"$OUT")
   echo "prompt: '$PROMPT'${SWITCH:+   (live switch -> '$SWITCH')}   thr=$THR  -> $OUT"
 fi
 
@@ -55,7 +55,7 @@ INNER='
   if [ -n "$GDINO_SWITCH" ]; then
     ( sleep 7; echo "$GDINO_SWITCH" > /tmp/gdino_prompt; echo "### switched -> $GDINO_SWITCH" ) &
   fi
-  exec ./build/gdino-preprocess-test /tmp/pre.txt /tmp/inf.txt "$GDINO_VIDEO"
+  exec ./build/gdino-app /tmp/pre.txt /tmp/inf.txt "$GDINO_VIDEO"
 '
 
 set +e
@@ -65,18 +65,9 @@ docker run --rm --gpus all -e NVIDIA_DRIVER_CAPABILITIES=all \
   -v "$FIFO":/tmp/gdino_prompt \
   "${EXTRA[@]}" -v "$PWD":/work -w /work "$IMAGE" bash -lc "$INNER" 2>&1 \
   | { if [ "$LIVE" = 1 ]; then cat; \
-      else grep -E "Number of objects|switched|End of stream|\[gdino\]|ERROR" | sed -n "1,8p;\$p"; fi; }
+      else grep -E "objs=|switched|End of stream|\[gdino\]|ERROR" | sed -n "1,8p;\$p"; fi; }
 set -e
 
-if [ "$LIVE" != 1 ]; then
-  N=$(ls out/frames/*.jpg 2>/dev/null | wc -l)
-  echo "frames written: $N"
-  if [ "$N" -gt 0 ] && command -v ffmpeg >/dev/null 2>&1; then
-    ffmpeg -y -framerate 25 -start_number 0 -i out/frames/ds_%05d.jpg \
-      -c:v libx264 -pix_fmt yuv420p -movflags +faststart "$OUT" 2>/dev/null || \
-    ffmpeg -y -framerate 25 -start_number 0 -i out/frames/ds_%05d.jpg -c:v mpeg4 -q:v 3 "$OUT" 2>/dev/null
-    echo "saved: $OUT"; ls -lh "$OUT"
-  elif [ "$N" -gt 0 ]; then
-    echo "frames are in out/frames/ (install ffmpeg to encode an MP4)"
-  fi
+if [ "$LIVE" != 1 ] && [ -f "$OUT" ]; then
+  echo "saved: $OUT"; ls -lh "$OUT"
 fi

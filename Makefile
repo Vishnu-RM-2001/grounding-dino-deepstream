@@ -46,5 +46,13 @@ $(BUILD)/libnvds_gdino_parser.so: src/nvdsparse_gdino.cpp $(BUILD)/libgdino_comm
 	$(CXX) $(CXXFLAGS) $(INC) $(DS_INC) -shared \
 	  src/nvdsparse_gdino.cpp -o $@ -L$(BUILD) -lgdino_common $(RPATH)
 
+$(BUILD)/gdino-app: app/gdino_app.cpp $(BUILD)/libgdino_common.so | $(BUILD)
+	$(CXX) $(CXXFLAGS) $(INC) $(DS_INC) $(GST_CFLAGS) \
+	  app/gdino_app.cpp -o $@ \
+	  -L$(BUILD) -lgdino_common \
+	  -L$(DS)/lib -lnvdsgst_meta \
+	  $(shell pkg-config --libs gstreamer-1.0 glib-2.0) \
+	  -L$(CUDA)/lib64 -lcudart $(RPATH)
+
 clean:
 	rm -rf $(BUILD)

@@ -1,0 +1,21 @@
+# compiled output
+build/
+
+# generated ONNX + TensorRT engine (created by scripts/02 and scripts/03)
+onnx/gdino_single_input.onnx
+onnx/*.engine
+
+# downloaded model (see README — download from NGC)
+model/
+
+# output videos
+out/
+
+# NGC CLI
+ngc-cli/
+ngc-cli.md5
+ngccli_linux.zip
+
+# misc
+*.o
+__pycache__/

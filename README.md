@@ -55,13 +55,16 @@ echo "dog, bicycle" > /tmp/gdino_prompt        # boxes switch on the next frame
 │           nvtiler → nvdsosd             │
 │  probe stamps the live phrase label     │
 │  on each box; OSD draws boxes + text    │
+│  FPS printed every 300 frames           │
 └──────────────────┬──────────────────────┘
           ┌────────┴────────┐
           ▼                 ▼
 ┌──────────────────┐  ┌──────────────────┐
 │   run.sh         │  │   run.sh --live  │
-│   annotated MP4  │  │   live X11 window│
-│   out/...mp4     │  │   (nveglglessink)│
+│  nvv4l2h264enc   │  │   live X11 window│
+│  → h264parse     │  │   (nveglglessink)│
+│  → mp4mux        │  │                  │
+│  → out/...mp4    │  │                  │
 └──────────────────┘  └──────────────────┘
 ```
 
@@ -79,15 +82,20 @@ so this project does three things:
    *current* prompt's tokens into that packed tensor every batch — this is what makes the
    text live. A control FIFO (`/tmp/gdino_prompt`) swaps the prompt atomically at runtime.
 3. **Decode + label.** `Gst-nvinfer` runs the engine and a custom bbox parser turns the raw
-   outputs into boxes; a small probe labels each box with the live phrase.
+   outputs into boxes; a probe in the app labels each box with the live phrase.
 
 ### About the app
 
-This repo does **not** ship its own DeepStream application. It reuses NVIDIA's stock
-`deepstream-preprocess-test` sample (which already chains `nvdspreprocess → nvinfer`).
-`app/integrate_sample_app.py` reads that sample from your installed DeepStream, applies a
-few small edits (the phrase-label probe, an environment-selectable sink, a clean-shutdown
-handler), and builds it.
+This repo ships its own DeepStream application at [`app/gdino_app.cpp`](app/gdino_app.cpp).
+It is a self-contained GStreamer app (~250 lines) that:
+
+- Builds the full `nvdspreprocess → nvinfer → nvdsosd` pipeline
+- Selects the output sink from an env var (`GDINO_OUT` for MP4, `GDINO_SINK` for a custom
+  element, or the default EGL/X11 display sink)
+- Encodes directly to H.264 MP4 via `nvv4l2h264enc → h264parse → mp4mux → filesink`
+  (GPU-accelerated, no intermediate JPEG frames, no ffmpeg dependency)
+- Stamps live phrase labels on each detection via a pad probe on `nvinfer`'s src pad
+- Prints FPS every 300 frames
 
 ---
 
@@ -149,10 +157,10 @@ From the repo root. Steps 1–4 are a one-time setup; after that, `run.sh` is al
 # 2) pack the model's 6 inputs into one  -> onnx/gdino_single_input.onnx
 ./scripts/02_make_onnx.sh model/grounding_dino_vgrounding_dino_swin_tiny_commercial_deployable_v1.0/grounding_dino_swin_tiny_commercial_deployable.onnx
 
-# 3) build the FP16 TensorRT engine  -> onnx/gdino_single_input_fp16.engine 
+# 3) build the FP16 TensorRT engine  -> onnx/gdino_single_input_fp16.engine
 ./scripts/03_build_engine.sh
 
-# 4) build the app from NVIDIA's stock sample + our edits
+# 4) build the app  -> build/gdino-app
 ./scripts/04_build_app.sh
 
 # run: detect cars and people, save an annotated MP4 -> out/gdino_out.mp4
@@ -195,8 +203,8 @@ cached afterwards.
 ```bash
 ./scripts/04_build_app.sh
 ```
-Integrates our edits into NVIDIA's `deepstream-preprocess-test` and compiles it to
-`build/gdino-preprocess-test`.
+Compiles `app/gdino_app.cpp` (our own GStreamer app) to `build/gdino-app`. No NVIDIA sample
+source is required — the app is self-contained in this repo.
 
 ### 5. Run
 ```bash
@@ -315,7 +323,6 @@ This project depends on third-party components with separate licenses — see [N
 | Component | License | Notes |
 |---|---|---|
 | NVIDIA DeepStream SDK 9.0 | NVIDIA Proprietary | Runs inside the Docker container; not distributed here |
-| `deepstream-preprocess-test` sample | NVIDIA Proprietary | Not copied into this repo; edits applied at build time |
 | TAO Grounding-DINO Swin-Tiny | NVIDIA model license | Downloaded from NGC; ONNX/engine are gitignored |
 | BERT vocabulary (`assets/vocab.txt`) | Apache-2.0 | `bert-base-uncased` WordPiece vocab |
 
