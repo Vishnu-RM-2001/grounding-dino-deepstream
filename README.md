@@ -129,6 +129,13 @@ ngc registry model download-version \
   --dest model/
 ```
 
+## Setup
+
+Make the scripts executable
+```bash
+chmod +x scripts/*.sh
+```
+
 ---
 
 ## Quick start
@@ -140,7 +147,7 @@ From the repo root. Steps 1–4 are a one-time setup; after that, `run.sh` is al
 ./scripts/01_build_libs.sh
 
 # 2) pack the model's 6 inputs into one  -> onnx/gdino_single_input.onnx
-./scripts/02_make_onnx.sh model/grounding_dinovgrounding_dino/grounding_dino_swin_tiny_commercial_deployable.onnx
+./scripts/02_make_onnx.sh model/grounding_dino_vgrounding_dino_swin_tiny_commercial_deployable_v1.0/grounding_dino_swin_tiny_commercial_deployable.onnx
 
 # 3) build the FP16 TensorRT engine  -> onnx/gdino_single_input_fp16.engine 
 ./scripts/03_build_engine.sh
