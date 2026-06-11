@@ -215,13 +215,6 @@ The next frame is detected against them, with no restart:
 echo "dog . tree ." > /tmp/gdino_prompt
 ```
 
-`run.sh` shares `/tmp/gdino_prompt` between the host and the container as a named pipe, so a
-plain `echo` from the host reaches the running pipeline. This works the same for both models.
-The `--switch` flag demonstrates it automatically, switching once frames are flowing:
-```bash
-./scripts/run.sh --video file:///workspace/data/dog_park.mp4 --switch "dog . tree ." "dog . person ."
-```
-
 Prompts use phrases separated by `.` or `,` (e.g. `"dog . person ."` or `"dog, person"`).
 
 ---
