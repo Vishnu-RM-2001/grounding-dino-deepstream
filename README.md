@@ -280,7 +280,7 @@ Detection threshold is the `--thr` flag of `run.sh` (default `0.3`).
 ## Use your own input video
 
 ```bash
-./scripts/run.sh --video file:///workspace/data/your_video.mp4 --out out.mp4 "car . person ."
+./scripts/run.sh --model $M --video file:///workspace/data/your_video.mp4 --out out.mp4 "car . person ."
 ```
 Put the file anywhere under the repo. It is mounted at `/workspace` in the container, so a file in
 `data/` is `file:///workspace/data/your_video.mp4`. For an RTSP camera, pass
@@ -297,8 +297,8 @@ Put the file anywhere under the repo. It is mounted at `/workspace` in the conta
 
 ```bash
 ./scripts/get_test_videos.sh
-./scripts/run.sh --video file:///workspace/data/dog_park.mp4 "dog . person . ball"
-./scripts/run.sh --video file:///workspace/data/tomatoes.mp4 "tomato . hand ."
+./scripts/run.sh --model $M --video file:///workspace/data/dog_park.mp4 "dog . person . ball"
+./scripts/run.sh --model $M --video file:///workspace/data/tomatoes.mp4 "tomato . hand ."
 ```
 
 Both files are gitignored; re-fetch them any time with `get_test_videos.sh`. When `--video`
@@ -313,7 +313,7 @@ is omitted, `run.sh` uses `data/dog_park.mp4`. The clips are from
 — it passes your X display and the GPU render node into the container:
 
 ```bash
-./scripts/run.sh --live --video file:///workspace/data/dog_park.mp4 "dog . person . ball"
+./scripts/run.sh --live --model $M --video file:///workspace/data/dog_park.mp4 "dog . person . ball"
 ```
 
 Requires an **X11 desktop session** (`echo $DISPLAY` is set). On Wayland, log into an
