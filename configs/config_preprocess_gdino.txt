@@ -5,7 +5,7 @@
 enable=1
 # must equal nvinfer gie-unique-id so the tensor is routed to it
 target-unique-ids=1
-# 2 = CUSTOM input order (our lib owns the layout)
+# 2 = CUSTOM input order (the custom lib owns the layout)
 network-input-order=2
 unique-id=5
 gpu-id=0

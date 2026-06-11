@@ -1,8 +1,7 @@
 /*
  * gdino_app.cpp — Grounding-DINO DeepStream 9 application.
  *
- * This is our own app, written from scratch. It no longer patches NVIDIA's
- * deepstream-preprocess-test sample — the full pipeline is here.
+ * A single self-contained GStreamer application that builds the full pipeline.
  *
  * Pipeline:
  *   uridecodebin → nvstreammux → nvdspreprocess → nvinfer →
