@@ -1,0 +1,20 @@
+# Pinned CPU export environment for the GroundingDINO SwinT-OGC ONNX export.
+# Versions chosen to match GroundingDINO's BertModelWarper API (get_extended_attention_mask
+# with a positional device arg) and to provide ONNX grid_sample (opset>=16).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.4.1
+torchvision==0.19.1
+transformers==4.44.2
+tokenizers
+huggingface_hub
+addict
+yapf
+timm
+numpy<2
+onnx==1.16.2
+onnxruntime==1.18.1
+onnx-graphsurgeon
+opencv-python-headless
+matplotlib
+pycocotools
+

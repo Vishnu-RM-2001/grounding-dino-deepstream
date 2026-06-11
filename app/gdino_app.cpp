@@ -11,13 +11,19 @@
  *   | <custom element>                                      (GDINO_SINK set)
  *   | nveglglessink / nv3dsink                             (live display)  }
  *
- * Env vars:
- *   GDINO_OUT   path for the output MP4 (e.g. /work/out/gdino_out.mp4)
- *   GDINO_SINK  name of a GStreamer sink element (e.g. nveglglessink)
- *   GDINO_THR   detection threshold (default 0.25)
- *   GDINO_LOG   set to anything to log every detection
+ * Flags (output/runtime knobs):
+ *   --out FILE      write an annotated H.264 MP4 to FILE
+ *   --sink ELEM     use a custom GStreamer sink element (e.g. fakesink, nveglglessink)
+ *                   (with neither --out nor --sink, a display sink is used)
+ *   --out-w N       output (tiler) width  (default 1280)
+ *   --out-h N       output (tiler) height (default 720)
+ *   --bitrate BPS   H.264 encoder bitrate in bits/s for --out
+ *   --log           log every detection to stdout
+ * Detection-tuning knobs live in the bbox parser (libnvds_gdino_parser), which is an
+ * nvinfer plugin with no argv, so it reads env: GDINO_THR (0.30), GDINO_NMS_IOU (0.50),
+ * GDINO_MAX_AREA (0.92). run.sh exposes these as flags and sets the env for you.
  *
- * Usage: gdino-app <preprocess-config> <infer-config> <uri> [<uri> ...]
+ * Usage: gdino-app [flags] <preprocess-config> <infer-config> <uri> [<uri> ...]
  */
 
 #include <gst/gst.h>
@@ -27,13 +33,17 @@
 #include <cuda_runtime_api.h>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
+#include <string>
+#include <vector>
 
 #include "gstnvdsmeta.h"
 #include "nvdspreprocess_meta.h"
 #include "gdino_prompt_store.h"
 
 #define MAX_LABEL_SIZE   128
-#define FPS_INTERVAL     300
+#define PERF_INTERVAL_SEC 5          /* DeepStream-style **PERF: FPS print interval */
+#define MAX_SRC          16
 
 #define MUXER_W          1920
 #define MUXER_H          1080
@@ -41,17 +51,40 @@
 #define TILER_W          1280
 #define TILER_H          720
 
+/* set by the --log flag; read in the label-stamp probe */
+static gboolean g_log_dets = FALSE;
+
+/* per-source frame counters for the **PERF: FPS printer (atomic; read+reset each tick) */
+static gint   g_fps_count[MAX_SRC] = {0};
+static guint  g_nsrc        = 1;
+static gint64 g_perf_last_us = 0;
+
+/* DeepStream-style periodic perf print: **PERF: FPS<src> <fps> ... over the last interval */
+static gboolean perf_print_cb(gpointer)
+{
+    gint64 now = g_get_monotonic_time();
+    double dt  = (now - g_perf_last_us) / 1e6;
+    g_perf_last_us = now;
+    GString *s = g_string_new("**PERF: ");
+    double total = 0.0;
+    for (guint i = 0; i < g_nsrc; i++) {
+        gint c = g_atomic_int_and(&g_fps_count[i], 0);   /* read + reset */
+        double f = dt > 0.0 ? c / dt : 0.0;
+        total += f;
+        g_string_append_printf(s, "FPS%u %.2f  ", i, f);
+    }
+    if (g_nsrc > 1) g_string_append_printf(s, "(total %.2f)", total);
+    g_print("%s\n", s->str);
+    g_string_free(s, TRUE);
+    return G_SOURCE_CONTINUE;
+}
+
 /* ── label-stamp + FPS probe ─────────────────────────────────────────────── */
 
 static GstPadProbeReturn
 pgie_src_probe(GstPad *, GstPadProbeInfo *info, gpointer)
 {
     auto *batch_meta = gst_buffer_get_nvds_batch_meta((GstBuffer *)info->data);
-
-    static struct timeval fps_t0 = {};
-    static guint          fps_n  = 0;
-    static gboolean       fps_init = FALSE;
-    if (!fps_init) { gettimeofday(&fps_t0, NULL); fps_init = TRUE; }
 
     for (auto *lf = batch_meta->frame_meta_list; lf; lf = lf->next) {
         auto *fm   = (NvDsFrameMeta *)lf->data;
@@ -83,20 +116,14 @@ pgie_src_probe(GstPad *, GstPadProbeInfo *info, gpointer)
             om->rect_params.border_width           = 3;
             om->rect_params.border_color           = {0, 1, 0, 1};
 
-            if (g_getenv("GDINO_LOG"))
+            if (g_log_dets)
                 g_print("[gdino] src=%d frm=%d  %s %.2f\n",
                         fm->source_id, fm->frame_num, lbl, om->confidence);
         }
 
         g_print("src=%d frame=%d objs=%u\n", fm->source_id, fm->frame_num, nr);
-
-        if (++fps_n % FPS_INTERVAL == 0) {
-            struct timeval t1; gettimeofday(&t1, NULL);
-            double s = (t1.tv_sec  - fps_t0.tv_sec) +
-                       (t1.tv_usec - fps_t0.tv_usec) * 1e-6;
-            g_print("[gdino] FPS: %.1f\n", (double)FPS_INTERVAL / s);
-            fps_t0 = t1;
-        }
+        guint si = fm->source_id < MAX_SRC ? fm->source_id : 0;
+        g_atomic_int_inc(&g_fps_count[si]);
     }
     return GST_PAD_PROBE_OK;
 }
@@ -199,21 +226,37 @@ make_elem(const char *factory, const char *name)
 
 int main(int argc, char *argv[])
 {
-    if (argc < 4) {
-        g_printerr("Usage: %s <preprocess-cfg> <infer-cfg> <uri> [<uri>...]\n",
+    /* Flags + positionals. Positionals: <preprocess-cfg> <infer-cfg> <uri> [<uri>...] */
+    const char *out_file = nullptr, *sink_name = nullptr;
+    int out_w = 0, out_h = 0, bitrate = 0;
+    std::vector<char *> pos;
+    for (int i = 1; i < argc; i++) {
+        std::string a = argv[i];
+        auto next = [&]() -> const char * { return (i + 1 < argc) ? argv[++i] : ""; };
+        if      (a == "--out")     out_file  = next();
+        else if (a == "--sink")    sink_name = next();
+        else if (a == "--out-w")   out_w     = atoi(next());
+        else if (a == "--out-h")   out_h     = atoi(next());
+        else if (a == "--bitrate") bitrate   = atoi(next());
+        else if (a == "--log")     g_log_dets = TRUE;
+        else                       pos.push_back(argv[i]);
+    }
+    if (pos.size() < 3) {
+        g_printerr("Usage: %s [--out FILE|--sink ELEM] [--out-w N] [--out-h N] "
+                   "[--bitrate BPS] [--log] <preprocess-cfg> <infer-cfg> <uri> [<uri>...]\n",
                    argv[0]);
         return 1;
     }
 
-    gchar *pre_cfg = realpath(argv[1], nullptr);
-    gchar *inf_cfg = realpath(argv[2], nullptr);
-    int    nsrc    = argc - 3;
+    gchar *pre_cfg = realpath(pos[0], nullptr);
+    gchar *inf_cfg = realpath(pos[1], nullptr);
+    int    nsrc    = (int)pos.size() - 2;
 
     /* detect integrated GPU to choose the right display sink */
     int dev = -1; cudaGetDevice(&dev);
     struct cudaDeviceProp prop; cudaGetDeviceProperties(&prop, dev);
 
-    gst_init(&argc, &argv);
+    gst_init(nullptr, nullptr);
     auto *loop = g_main_loop_new(nullptr, FALSE);
 
     /* ── create pipeline elements ── */
@@ -228,9 +271,9 @@ int main(int argc, char *argv[])
          *q3 = make_elem("queue","q3"), *q4 = make_elem("queue","q4"),
          *q5 = make_elem("queue","q5"), *q6 = make_elem("queue","q6");
 
-    /* ── sink branch (selected by env) ── */
-    const char *gdino_out  = g_getenv("GDINO_OUT");
-    const char *gdino_sink = g_getenv("GDINO_SINK");
+    /* ── sink branch (selected by flags) ── */
+    const char *gdino_out  = out_file;
+    const char *gdino_sink = sink_name;
     GstElement *oconv = nullptr, *ocaps = nullptr,
                *h264enc = nullptr, *h264parse = nullptr,
                *muxer = nullptr, *sink = nullptr;
@@ -245,6 +288,7 @@ int main(int argc, char *argv[])
         auto *caps = gst_caps_from_string("video/x-raw(memory:NVMM),format=NV12");
         g_object_set(ocaps, "caps", caps, nullptr);
         gst_caps_unref(caps);
+        if (bitrate > 0) g_object_set(h264enc, "bitrate", (guint)bitrate, nullptr);
         g_object_set(sink, "location", gdino_out, nullptr);
     } else if (gdino_sink && *gdino_sink) {
         sink = make_elem(gdino_sink, "sink");
@@ -273,12 +317,14 @@ int main(int argc, char *argv[])
                  "input-tensor-meta", TRUE,
                  nullptr);
 
+    guint tiler_w = out_w > 0 ? (guint)out_w : TILER_W;
+    guint tiler_h = out_h > 0 ? (guint)out_h : TILER_H;
     guint rows = (guint)sqrt((double)nsrc);
     g_object_set(tiler,
                  "rows",    rows,
                  "columns", (guint)ceil((double)nsrc / rows),
-                 "width",   TILER_W,
-                 "height",  TILER_H,
+                 "width",   tiler_w,
+                 "height",  tiler_h,
                  nullptr);
     g_object_set(nvosd, "process-mode", 1, "display-text", 1, nullptr);
     g_object_set(sink,  "qos", FALSE, "sync", FALSE, nullptr);
@@ -286,7 +332,7 @@ int main(int argc, char *argv[])
     /* ── wire up sources → streammux ── */
     gst_bin_add(GST_BIN(pipeline), streammux);
     for (int i = 0; i < nsrc; i++) {
-        auto *src = make_source_bin(i, argv[i + 3]);
+        auto *src = make_source_bin(i, pos[i + 2]);
         if (!src) return 1;
         gst_bin_add(GST_BIN(pipeline), src);
 
@@ -358,11 +404,16 @@ int main(int argc, char *argv[])
             return 1;
     }
 
-    /* ── add label-stamp + FPS probe on pgie src pad ── */
+    /* ── add label-stamp + frame-count probe on pgie src pad ── */
     auto *pgie_src = gst_element_get_static_pad(pgie, "src");
     gst_pad_add_probe(pgie_src, GST_PAD_PROBE_TYPE_BUFFER,
                       pgie_src_probe, nullptr, nullptr);
     gst_object_unref(pgie_src);
+
+    /* ── DeepStream-style **PERF: FPS printer (every PERF_INTERVAL_SEC) ── */
+    g_nsrc = (guint)nsrc < MAX_SRC ? (guint)nsrc : MAX_SRC;
+    g_perf_last_us = g_get_monotonic_time();
+    g_timeout_add_seconds(PERF_INTERVAL_SEC, perf_print_cb, nullptr);
 
     /* ── bus watch + signal handlers ── */
     auto *bus = gst_pipeline_get_bus(GST_PIPELINE(pipeline));

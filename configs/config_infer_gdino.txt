@@ -4,7 +4,7 @@
 [property]
 gpu-id=0
 net-scale-factor=1.0
-model-engine-file=@@ROOT@@/onnx/gdino_single_input_fp16.engine
+model-engine-file=@@ENGINE@@
 network-type=0
 num-detected-classes=100
 cluster-mode=4

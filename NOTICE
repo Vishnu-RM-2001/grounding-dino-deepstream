@@ -6,11 +6,18 @@ plugin libraries under src/, the ONNX surgery script, the configs, scripts, and
 the sample-app integrator). It does NOT cover the third-party components below,
 which you obtain yourself and which carry their own licenses.
 
-1. Grounding-DINO model (Swin-Tiny, commercial deployable)
+1a. Grounding-DINO model — --model tao (Swin-Tiny, commercial deployable)
    Source : NVIDIA NGC / TAO
             https://catalog.ngc.nvidia.com/orgs/nvidia/teams/tao/models/grounding_dino
    License : NVIDIA model license shown on the NGC page. Review and accept it.
    This repo does NOT include the model; you download it (see README).
+
+1b. Grounding-DINO model — --model gdino_b (IDEA-Research GroundingDINO, SwinT-OGC)
+   Source : https://github.com/IDEA-Research/GroundingDINO  (Apache-2.0)
+            weights: groundingdino_swint_ogc.pth (release asset).
+   The repo is cloned and the .pth downloaded by scripts/00_get_model.sh, then
+   exported to ONNX locally (export/export_onnx.py). Not redistributed here.
+   The export also downloads bert-base-uncased from Hugging Face at export time.
 
 2. DeepStream SDK and the `deepstream-preprocess-test` sample app
    Source : NVIDIA DeepStream 9.0 container / SDK.
@@ -23,5 +30,12 @@ which you obtain yourself and which carry their own licenses.
 3. BERT vocabulary (assets/vocab.txt)
    The standard `bert-base-uncased` WordPiece vocabulary (Apache-2.0, Google /
    Hugging Face). Used by the tokenizer to match the model's text encoder.
+
+4. Demo sample clip (data/sample.mp4)
+   Source : Roboflow supervision video-examples (people-walking.mp4)
+            https://media.roboflow.com/supervision/video-examples/people-walking.mp4
+   Downloaded by scripts/get_test_videos.sh; NOT committed (data/ is gitignored).
+   The hero image assets/demo_gdino.jpg is a frame from this clip annotated by the
+   model. Used here only for demonstration.
 
 You are responsible for complying with each component's license.

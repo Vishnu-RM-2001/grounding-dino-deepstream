@@ -17,8 +17,13 @@ struct Detection {
   std::string label;
 };
 
+// Decode raw GDINO outputs into labeled detections.
+//   box_thr  : minimum score to keep a box (per-phrase max-sigmoid over its tokens).
+//   nms_iou  : class-agnostic NMS IoU threshold; pass <= 0 to disable NMS.
+//   max_area : drop boxes whose normalized area (w*h) exceeds this — the occasional
+//              whole-image box; pass >= 1.0 to disable the filter.
 void decodeGDINO(const float* logits, int Q, int T, const float* boxes,
-                 const PromptState& st, float box_thr, float text_thr,
+                 const PromptState& st, float box_thr, float nms_iou, float max_area,
                  int frameW, int frameH, std::vector<Detection>& out);
 
 } // namespace gdino

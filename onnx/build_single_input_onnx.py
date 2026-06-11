@@ -4,25 +4,37 @@ Pack the 6 Grounding-DINO inputs into one fp32 'packed' input and split them bac
 inside the graph with a small Slice/Reshape/Cast preamble, so nvinfer can take the
 single per-frame tensor that nvdspreprocess provides.
 
-Pack order (all written as float32 by the preprocess lib):
-    inputs          [1,3,544,960]  fp32
-    input_ids       [1,256]        i64
-    attention_mask  [1,256]        bool
-    position_ids    [1,256]        i64
-    token_type_ids  [1,256]        i64
-    text_token_mask [1,256,256]    bool
+Two models are supported; they differ only in the order of the text inputs and in
+which mask is 2-D (block-diagonal). Pick with --variant (default: auto-detect):
+
+  tao       inputs, input_ids, attention_mask[256], position_ids, token_type_ids,
+            text_token_mask[256,256]
+  gdino_b image, input_ids, token_type_ids, attention_mask[256,256], position_ids,
+            text_token_mask[256]
+
+The chosen order MUST match src/gdino_layout.h / writeTextRegion for that variant.
 """
 import argparse, json, os
 import numpy as np
 import onnx
 import onnx_graphsurgeon as gs
 
-# elem_type -> (numpy dtype, gs cast-to numpy dtype). 1=FLOAT 7=INT64 9=BOOL
-ELEM = {1: np.float32, 7: np.int64, 9: np.bool_}
+PACK_ORDERS = {
+    "tao":      ["inputs", "input_ids", "attention_mask",
+                 "position_ids", "token_type_ids", "text_token_mask"],
+    "gdino_b": ["image", "input_ids", "token_type_ids",
+                 "attention_mask", "position_ids", "text_token_mask"],
+}
 
-# The fixed pack order. Image first, then the five text tensors.
-PACK_ORDER = ["inputs", "input_ids", "attention_mask",
-              "position_ids", "token_type_ids", "text_token_mask"]
+
+def detect_variant(by_name):
+    # the gdino_b export names the image "image" and makes attention_mask the 2-D mask;
+    # the TAO export names it "inputs" and makes text_token_mask the 2-D mask.
+    if "image" in by_name:
+        return "gdino_b"
+    if "inputs" in by_name:
+        return "tao"
+    raise SystemExit(f"cannot auto-detect variant; inputs: {list(by_name)}")
 
 
 def main():
@@ -30,11 +42,15 @@ def main():
     ap.add_argument("--in", dest="inp", required=True, help="original onnx")
     ap.add_argument("--out", dest="out", required=True, help="single-input onnx")
     ap.add_argument("--layout", required=True, help="layout json to write")
+    ap.add_argument("--variant", choices=["tao", "gdino_b", "auto"], default="auto")
     ap.add_argument("--packed-name", default="packed")
     args = ap.parse_args()
 
     graph = gs.import_onnx(onnx.load(args.inp))
     by_name = {t.name: t for t in graph.inputs}
+    variant = detect_variant(by_name) if args.variant == "auto" else args.variant
+    PACK_ORDER = PACK_ORDERS[variant]
+    print(f"variant: {variant}  pack_order: {PACK_ORDER}")
     missing = [n for n in PACK_ORDER if n not in by_name]
     if missing:
         raise SystemExit(f"inputs not found in model: {missing}; "
@@ -102,8 +118,8 @@ def main():
 
     onnx.save(gs.export_onnx(graph), args.out)
     with open(args.layout, "w") as f:
-        json.dump({"packed_name": args.packed_name, "total": total,
-                   "pack_order": PACK_ORDER, "tensors": layout}, f, indent=2)
+        json.dump({"packed_name": args.packed_name, "variant": variant,
+                   "total": total, "pack_order": PACK_ORDER, "tensors": layout}, f, indent=2)
 
     print(f"Wrote {args.out}")
     print(f"Packed input '{args.packed_name}': [1, {total}] float32  "

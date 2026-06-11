@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Copy a sample video out of the DeepStream image into data/ (no external
-# download — these ship inside the container). sample_720p.mp4 is a street scene
-# with cars and people; run.sh also uses it by default.
+# Download a Grounding-DINO demo clip into data/sample.mp4. It's the short (~14 s)
+# overhead-concourse "people-walking" clip used throughout GroundingDINO / supervision
+# demos — a crowd of pedestrians with bags, great for open-vocabulary prompts.
+# Source: Roboflow supervision video-examples (people-walking.mp4).
+# The file lands in data/ (gitignored) — kept locally, re-fetched by this script.
 set -e
 cd "$(dirname "$0")/.."
-IMAGE=${IMAGE:-nvcr.io/nvidia/deepstream:9.0-samples-multiarch}
 mkdir -p data
-docker run --rm -v "$PWD/data":/out "$IMAGE" \
-  bash -lc 'cp /opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 /out/'
-echo "done:"; ls -lh data/*.mp4
+URL=${GDINO_SAMPLE_URL:-https://media.roboflow.com/supervision/video-examples/people-walking.mp4}
+if [ ! -s data/sample.mp4 ]; then
+  echo "downloading sample clip..."
+  curl -L -o data/sample.mp4 "$URL"
+fi
+ls -lh data/sample.mp4
 echo
-echo "run:  ./scripts/run.sh \"car, man\" file:///work/data/sample_720p.mp4 out/sample.mp4"
-echo "(other clips live in /opt/nvidia/deepstream/deepstream/samples/streams/ inside the image)"
+echo "run:  ./scripts/run.sh \"person . backpack . handbag .\""

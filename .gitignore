@@ -1,15 +1,23 @@
 # compiled output
 build/
 
-# generated ONNX + TensorRT engine (created by scripts/02 and scripts/03)
-onnx/gdino_single_input.onnx
+# generated ONNX + TensorRT engines (created by scripts/02 and scripts/03)
+onnx/*.onnx
 onnx/*.engine
+assets/*_pack_layout.json
+assets/pack_layout.json
 
-# downloaded model (see README — download from NGC)
+# downloaded / cloned model assets
+# (tao ONNX from NGC; cloned IDEA-Research repo; the .pth; bert download cache)
 model/
+GroundingDINO/
+weights/
+.hf_cache/
 
-# output videos
+# sample / output video (sample is copied by scripts/get_test_videos.sh)
+data/
 out/
+*.mp4
 
 # NGC CLI
 ngc-cli/

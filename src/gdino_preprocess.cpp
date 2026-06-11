@@ -27,6 +27,7 @@ struct CustomCtx {
   float stdv[3] = {0.229f, 0.224f, 0.225f};
   float inv_scale = 1.0f / 255.0f;
   float* text_host = nullptr;          // pinned, TEXT_COUNT floats
+  gdino::Variant variant = gdino::Variant::TAO;   // packed text-tensor order
 };
 
 static std::string cfg(const std::unordered_map<std::string, std::string>& m,
@@ -46,6 +47,7 @@ extern "C" CustomCtx* initLib(CustomInitParams initparams) {
   std::string vocab = cfg(uc, "vocab-path", "");
   std::string prompt = cfg(uc, "prompt", "person .");
   std::string fifo = cfg(uc, "fifo-path", "/tmp/gdino_prompt");
+  ctx->variant = gdino::variantFromString(cfg(uc, "model-variant", "tao"));
   parse3(cfg(uc, "mean", "0.485,0.456,0.406"), ctx->mean);
   parse3(cfg(uc, "std", "0.229,0.224,0.225"), ctx->stdv);
   ctx->inv_scale = 1.0f / std::stof(cfg(uc, "pixel-scale", "255.0"));
@@ -63,7 +65,8 @@ extern "C" CustomCtx* initLib(CustomInitParams initparams) {
 
   cudaStreamCreate(&ctx->stream);
   cudaMallocHost((void**)&ctx->text_host, gdino::TEXT_COUNT * sizeof(float));
-  fprintf(stderr, "[gdino] initLib OK (mean %.3f,%.3f,%.3f std %.3f,%.3f,%.3f)\n",
+  fprintf(stderr, "[gdino] initLib OK (variant=%s, mean %.3f,%.3f,%.3f std %.3f,%.3f,%.3f)\n",
+          gdino::variantName(ctx->variant),
           ctx->mean[0], ctx->mean[1], ctx->mean[2], ctx->stdv[0], ctx->stdv[1], ctx->stdv[2]);
   return ctx;
 }
@@ -93,7 +96,7 @@ CustomTensorPreparation(CustomCtx* ctx, NvDsPreProcessBatch* batch,
   // CURRENT prompt -> contiguous text floats (same for all frames in the batch)
   auto snap = gdino::PromptStore::instance().current();
   if (!snap) { acquirer->release(buf); return NVDSPREPROCESS_TENSOR_NOT_READY; }
-  gdino::writeTextFloatsCompact(snap->text, ctx->text_host);
+  gdino::writeTextRegion(ctx->variant, snap->text, ctx->text_host);
 
   // converted frame layout (network-res, interleaved). Assumes scaling pool is
   // RGBA(4ch) or RGB(3ch); pitch from batch.
@@ -114,7 +117,7 @@ CustomTensorPreparation(CustomCtx* ctx, NvDsPreProcessBatch* batch,
       fprintf(stderr, "[gdino] normalize failed: %s\n", cudaGetErrorString(e));
       acquirer->release(buf); return NVDSPREPROCESS_CUDA_ERROR;
     }
-    cudaMemcpyAsync(base + gdino::OFF_INPUT_IDS, ctx->text_host,
+    cudaMemcpyAsync(base + gdino::OFF_TEXT, ctx->text_host,
                     gdino::TEXT_COUNT * sizeof(float),
                     cudaMemcpyHostToDevice, ctx->stream);
   }
