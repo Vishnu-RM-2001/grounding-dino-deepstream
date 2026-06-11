@@ -32,7 +32,7 @@ static void nms(std::vector<Detection>& dets, float iou_thr) {
 }
 
 void decodeGDINO(const float* logits, int Q, int T, const float* boxes,
-                 const PromptState& st, float box_thr, float text_thr,
+                 const PromptState& st, float box_thr, float nms_iou, float max_area,
                  int frameW, int frameH, std::vector<Detection>& out) {
   const auto& spans = st.text.phrase_spans;
   const auto& phrases = st.text.phrases;
@@ -48,11 +48,10 @@ void decodeGDINO(const float* logits, int Q, int T, const float* boxes,
       if (s > best_s) { best_s = s; best_p = (int)p; }
     }
     if (best_p < 0 || best_s < box_thr) continue;
-    (void)text_thr;
 
     const float* bq = boxes + (size_t)q * 4;
     float cx = bq[0], cy = bq[1], w = bq[2], h = bq[3];   // normalized cxcywh
-    if (w * h > 0.92f) continue;   // drop the occasional whole-image box
+    if (w * h > max_area) continue;   // drop the occasional whole-image box
     Detection d;
     d.left   = (cx - w * 0.5f) * frameW;
     d.top    = (cy - h * 0.5f) * frameH;
@@ -65,7 +64,7 @@ void decodeGDINO(const float* logits, int Q, int T, const float* boxes,
     d.label = (best_p < (int)phrases.size()) ? phrases[best_p] : std::string("object");
     out.push_back(std::move(d));
   }
-  nms(out, 0.5f);
+  if (nms_iou > 0.0f) nms(out, nms_iou);
 }
 
 } // namespace gdino

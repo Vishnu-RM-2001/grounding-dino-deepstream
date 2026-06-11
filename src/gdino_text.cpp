@@ -94,28 +94,22 @@ bool buildTextTensors(const BertTokenizer& tok, const std::string& caption,
   return true;
 }
 
-void writeTextFloats(const TextTensors& t, float* packed) {
-  float* ids  = packed + OFF_INPUT_IDS;
-  float* att  = packed + OFF_ATTENTION_MASK;
-  float* pos  = packed + OFF_POSITION_IDS;
-  float* typ  = packed + OFF_TOKEN_TYPE_IDS;
-  float* mask = packed + OFF_TEXT_MASK;
-  for (int i = 0; i < MAX_TOKENS; ++i) {
-    ids[i] = (float)t.input_ids[i];
-    att[i] = (float)t.attention_mask[i];
-    pos[i] = (float)t.position_ids[i];
-    typ[i] = (float)t.token_type_ids[i];
+void writeTextRegion(Variant v, const TextTensors& t, float* out) {
+  int k = 0;
+  auto put1 = [&](const int* a) { for (int i = 0; i < MAX_TOKENS; ++i) out[k++] = (float)a[i]; };
+  auto putBlock = [&]() { for (int i = 0; i < MASK_COUNT; ++i) out[k++] = (float)t.text_mask[i]; };
+  if (v == Variant::TAO) {
+    // input_ids, attention_mask(pad)[256], position_ids, token_type_ids, text_token_mask(block)[256,256]
+    put1(t.input_ids); put1(t.attention_mask); put1(t.position_ids); put1(t.token_type_ids); putBlock();
+  } else {
+    // input_ids, token_type_ids, attention_mask(block)[256,256], position_ids, text_token_mask(pad)[256]
+    put1(t.input_ids); put1(t.token_type_ids); putBlock(); put1(t.position_ids); put1(t.attention_mask);
   }
-  for (int i = 0; i < MASK_COUNT; ++i) mask[i] = (float)t.text_mask[i];
 }
 
-void writeTextFloatsCompact(const TextTensors& t, float* out) {
-  int k = 0;
-  for (int i = 0; i < MAX_TOKENS; ++i) out[k++] = (float)t.input_ids[i];
-  for (int i = 0; i < MAX_TOKENS; ++i) out[k++] = (float)t.attention_mask[i];
-  for (int i = 0; i < MAX_TOKENS; ++i) out[k++] = (float)t.position_ids[i];
-  for (int i = 0; i < MAX_TOKENS; ++i) out[k++] = (float)t.token_type_ids[i];
-  for (int i = 0; i < MASK_COUNT; ++i) out[k++] = (float)t.text_mask[i];
+Variant variantFromString(const std::string& s) {
+  return (s == "gdino_b" || s == "b") ? Variant::GDINO_B : Variant::TAO;
 }
+const char* variantName(Variant v) { return v == Variant::GDINO_B ? "gdino_b" : "tao"; }
 
 } // namespace gdino

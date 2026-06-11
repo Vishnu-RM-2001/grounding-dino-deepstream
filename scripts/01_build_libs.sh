@@ -4,7 +4,7 @@
 set -e
 cd "$(dirname "$0")/.."
 IMAGE=${IMAGE:-nvcr.io/nvidia/deepstream:9.0-samples-multiarch}
-docker run --rm --gpus all -v "$PWD":/work -w /work "$IMAGE" bash -lc '
+docker run --rm --gpus all -v "$PWD":/workspace -w /workspace "$IMAGE" bash -lc '
   set -e
   if [ ! -x /usr/local/cuda-13.1/bin/nvcc ]; then
     echo "installing nvcc..."

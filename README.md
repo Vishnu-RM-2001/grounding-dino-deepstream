@@ -2,22 +2,31 @@
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![DeepStream](https://img.shields.io/badge/DeepStream-9.0-76b900.svg)
-![Grounding-DINO](https://img.shields.io/badge/TAO-Grounding--DINO-blue.svg)
+![Grounding-DINO](https://img.shields.io/badge/Grounding--DINO-TAO%20%7C%20IDEA--Research-blue.svg)
 ![Open-Vocabulary](https://img.shields.io/badge/detection-open--vocabulary-orange.svg)
 
-Run NVIDIA's **TAO Grounding-DINO Swin-Tiny** open-vocabulary detector on NVIDIA
-**DeepStream 9.0**, on the real `Gst-nvinfer` element — and **change what it detects
-while the stream is running**, just by typing words. No restart.
+Run Grounding-DINO Swin-Tiny open-vocabulary detection on NVIDIA DeepStream 9.0, using the
+`Gst-nvinfer` element. The prompt is read from a control file, so you can change what the
+model detects while the stream is running, without a restart.
+
+Two interchangeable models, selected with `--model gdino_b` (default) or `--model tao`:
+
+| `MODEL` | what it is | source |
+|---|---|---|
+| `tao` | NVIDIA TAO Grounding-DINO Swin-Tiny (commercial deployable) | ONNX from NGC |
+| `gdino_b` | IDEA-Research GroundingDINO SwinT-OGC | `.pth`, exported to ONNX here |
+
+Both run through the same pipeline, plugins and app. They differ only in which engine is
+loaded and the order of the packed text tensors (the `model-variant` config key).
 
 ```bash
-echo "dog, bicycle" > /tmp/gdino_prompt        # boxes switch on the next frame
+echo "cat . bicycle ." > /tmp/gdino_prompt      # classes switch on the next frame
 ```
 
 ![demo](assets/demo_gdino.jpg)
 
-> `car, man` on a live stream — cars and people boxed and labelled with their phrase.
-> Type `bus, bicycle, backpack` and the classes change mid-stream. It's open-vocabulary,
-> so the classes are whatever words you give it, not a fixed list.
+> `tomato . hand .` on `data/tomatoes.mp4`. The classes are just the words in the prompt;
+> change them at runtime and the next frame is detected against the new ones.
 
 ---
 
@@ -36,16 +45,16 @@ echo "dog, bicycle" > /tmp/gdino_prompt        # boxes switch on the next frame
 └──────────────────┬──────────────────────┘
                    ▼
 ┌─────────────────────────────────────────┐
-│         nvdspreprocess (our lib)        │
+│        nvdspreprocess (custom lib)      │
 │  • resize + normalize the frame         │
-│  • tokenize the CURRENT prompt          │
+│  • tokenize the current prompt          │
 │  • pack image + 5 text tensors → 1      │
 └──────────────────┬──────────────────────┘
-                   ▼          ▲  echo "dog, bicycle" > /tmp/gdino_prompt
+                   ▼          ▲  echo "cat . bicycle ." > /tmp/gdino_prompt
 ┌─────────────────────────────────────────┐   (live, no restart)
 │                nvinfer                  │
-│   Grounding-DINO ONNX → TensorRT FP16   │
-│  NvDsInferParseCustomGDINO (our parser):│
+│   Grounding-DINO ONNX → TensorRT engine │
+│  NvDsInferParseCustomGDINO (custom):    │
 │   • decode pred_logits / pred_boxes     │
 │   • threshold + class-agnostic NMS      │
 │   • emit boxes, class_id = phrase idx   │
@@ -55,7 +64,7 @@ echo "dog, bicycle" > /tmp/gdino_prompt        # boxes switch on the next frame
 │           nvtiler → nvdsosd             │
 │  probe stamps the live phrase label     │
 │  on each box; OSD draws boxes + text    │
-│  FPS printed every 300 frames           │
+│  periodic perf line on stdout           │
 └──────────────────┬──────────────────────┘
           ┌────────┴────────┐
           ▼                 ▼
@@ -68,34 +77,40 @@ echo "dog, bicycle" > /tmp/gdino_prompt        # boxes switch on the next frame
 └──────────────────┘  └──────────────────┘
 ```
 
-### The trick: one tensor, six inputs, live text
+### Packing six inputs into one tensor
 
-Grounding-DINO is open-vocabulary — it takes an **image plus a text prompt** and detects
-whatever the prompt names. So the network has **6 inputs**: the image, plus 5 tensors that
-describe the tokenized prompt. DeepStream's per-frame tensor path only carries one input,
-so this project does three things:
+Grounding-DINO takes an image plus a text prompt and detects whatever the prompt names, so
+the network has six inputs: the image and five tensors describing the tokenized prompt.
+DeepStream's per-frame tensor path carries only one input, so the project does three things:
 
-1. **Pack and split.** `onnx/build_single_input_onnx.py` packs the image + 5 text tensors
-   into one `packed` tensor and adds a small in-graph preamble that splits it back into the
-   6 real inputs. The model's output is unchanged.
-2. **Per-frame text.** A custom `nvdspreprocess` plugin normalizes the frame and writes the
-   *current* prompt's tokens into that packed tensor every batch — this is what makes the
-   text live. A control FIFO (`/tmp/gdino_prompt`) swaps the prompt atomically at runtime.
-3. **Decode + label.** `Gst-nvinfer` runs the engine and a custom bbox parser turns the raw
-   outputs into boxes; a probe in the app labels each box with the live phrase.
+1. Pack and split. `onnx/build_single_input_onnx.py` packs the image and five text tensors
+   into one `packed` tensor and adds an in-graph preamble that splits it back into the six
+   real inputs. The model's output is unchanged.
+2. Per-frame text. A custom `nvdspreprocess` plugin normalizes the frame and writes the
+   current prompt's tokens into the packed tensor every batch. A control FIFO
+   (`/tmp/gdino_prompt`) swaps the prompt atomically at runtime, which is what makes the
+   text live.
+3. Decode and label. `Gst-nvinfer` runs the engine and a custom bbox parser turns the raw
+   outputs into boxes; a probe in the app labels each box with the current phrase.
+
+The only per-model difference is the order of the five text tensors in the packed buffer,
+and which mask is the `[256,256]` block-diagonal: `tao` and `gdino_b` swap the roles of
+`attention_mask` and `text_token_mask`. The `model-variant` config key (set by `run.sh`
+from `--model`) tells the preprocess plugin which order to write. Everything else —
+tokenizer, mask recipe, decoder, app — is shared. See `src/gdino_layout.h`.
 
 ### About the app
 
-This repo ships its own DeepStream application at [`app/gdino_app.cpp`](app/gdino_app.cpp).
-It is a self-contained GStreamer app (~250 lines) that:
+The DeepStream application is [`app/gdino_app.cpp`](app/gdino_app.cpp). It is a single
+GStreamer app that:
 
 - Builds the full `nvdspreprocess → nvinfer → nvdsosd` pipeline
-- Selects the output sink from an env var (`GDINO_OUT` for MP4, `GDINO_SINK` for a custom
-  element, or the default EGL/X11 display sink)
+- Selects the output sink from flags (`--out` for MP4, `--sink` for a custom element,
+  or the default EGL/X11 display sink)
 - Encodes directly to H.264 MP4 via `nvv4l2h264enc → h264parse → mp4mux → filesink`
   (GPU-accelerated, no intermediate JPEG frames, no ffmpeg dependency)
 - Stamps live phrase labels on each detection via a pad probe on `nvinfer`'s src pad
-- Prints FPS every 300 frames
+- Prints a periodic DeepStream-style `**PERF:` status line (per source)
 
 ---
 
@@ -118,120 +133,96 @@ It is a self-contained GStreamer app (~250 lines) that:
   ```bash
   docker run --rm --gpus all nvcr.io/nvidia/deepstream:9.0-samples-multiarch nvidia-smi
   ```
-- A free [NGC account](https://ngc.nvidia.com) to download the model.
-
----
-
-## Get the model
-
-Download the **Grounding-DINO Swin-Tiny (commercial deployable)** ONNX from NGC:
-
-> https://catalog.ngc.nvidia.com/orgs/nvidia/teams/tao/models/grounding_dino?version=grounding_dino_swin_tiny_commercial_deployable_v1.0
-
-Using the [NGC CLI](https://org.ngc.nvidia.com/setup/installers/cli):
-```bash
-mkdir -p model
-
-ngc registry model download-version \
-  "nvidia/tao/grounding_dino:grounding_dino_swin_tiny_commercial_deployable_v1.0" \
-  --dest model/
-```
-
-## Setup
-
-Make the scripts executable
-```bash
-chmod +x scripts/*.sh
-```
+- Internet on first setup: `--model tao` pulls the ONNX from NGC (anonymous, no account
+  needed); `--model gdino_b` clones the GroundingDINO repo + weights and fetches
+  `bert-base-uncased`. `00_get_model.sh` handles both.
 
 ---
 
 ## Quick start
 
-From the repo root. Steps 1–4 are a one-time setup; after that, `run.sh` is all you need.
+Pick a model with `--model gdino_b` (default) or `--model tao`. Steps 0–4 are a
+one-time setup per model; after that, `run.sh` is all you need. The plugin libs and app
+(steps 1, 4) are **model-agnostic** — build them once and they work for both.
 
 ```bash
-# 1) build the three plugin libraries  (installs nvcc in-container on first run)
+chmod +x scripts/*.sh
+M=gdino_b                   # or: M=tao  (just a shell var for the examples)
+
+# 0) fetch the model assets
+#    tao      -> downloads the ONNX from NGC
+#    gdino_b -> clones IDEA-Research/GroundingDINO, downloads the .pth, builds the
+#                CPU export image (gdino-export)
+./scripts/00_get_model.sh   --model $M
+
+# 1) build the three plugin libraries (model-agnostic; installs nvcc in-container once)
 ./scripts/01_build_libs.sh
 
-# 2) pack the model's 6 inputs into one  -> onnx/gdino_single_input.onnx
-./scripts/02_make_onnx.sh model/grounding_dino_vgrounding_dino_swin_tiny_commercial_deployable_v1.0/grounding_dino_swin_tiny_commercial_deployable.onnx
+# 2) produce the packed single-input ONNX  -> onnx/<model>_packed.onnx
+#    tao = pack the NGC ONNX; gdino_b = export from .pth, then pack
+./scripts/02_make_onnx.sh   --model $M
 
-# 3) build the FP16 TensorRT engine  -> onnx/gdino_single_input_fp16.engine
-./scripts/03_build_engine.sh
+# 3) build the TensorRT engine             -> onnx/<model>.engine   (FP32 default)
+./scripts/03_build_engine.sh --model $M
 
-# 4) build the app  -> build/gdino-app
+# 4) build the app (model-agnostic)        -> build/gdino-app
 ./scripts/04_build_app.sh
 
-# run: detect cars and people, save an annotated MP4 -> out/gdino_out.mp4
-./scripts/run.sh "car, man"
-```
-Open `out/gdino_out.mp4`.
+# 5) download the two demo clips          -> data/dog_park.mp4, data/tomatoes.mp4
+./scripts/get_test_videos.sh
 
-To run on your own footage, pass a file URI:
-```bash
-./scripts/run.sh "dog, bicycle" file:///path/to/your_video.mp4 out.mp4
+# run: detect the dog and its owner, save an annotated MP4 -> out/gdino_<model>.mp4
+./scripts/run.sh --model $M --video file:///workspace/data/dog_park.mp4 "dog . person . ball"
 ```
+
+Switch model and clip with the same flags:
+```bash
+./scripts/run.sh --model gdino_b --video file:///workspace/data/dog_park.mp4 "dog . person . ball"
+./scripts/run.sh --model tao     --video file:///workspace/data/tomatoes.mp4 "tomato . hand ."
+```
+
+> The `gdino_b` model also needs the **gdino-export** image (built by `00_get_model.sh`)
+> for the PyTorch→ONNX export. `tao` needs no extra image.
+>
+> Every script also accepts `MODEL`/`PRECISION` env vars as a fallback, but **flags are
+> the documented interface** and take precedence.
 
 ---
 
-## Step by step
+## Choosing precision
 
-### 1. Build the plugin libraries
+`--precision` flag for `03_build_engine.sh` (default `fp32`). Both models can only run in
+TensorRT — for `tao` the ONNX carries a custom deformable-attn plugin; the `gdino_b`
+export uses pure-PyTorch ops — so the **FP32 engine is the accuracy reference**.
+
+| precision | tao | gdino_b |
+|---|---|---|
+| **fp32** (default) | max accuracy | max accuracy |
+| **fp16** | faster, accuracy drops | broken — scores collapse, boxes degenerate |
+| **bf16** | degraded (worse than fp16 here) | correct boxes, scores ~0.15 lower |
+
 ```bash
-./scripts/01_build_libs.sh
+./scripts/03_build_engine.sh --model tao --precision fp16    # faster, lower recall
 ```
-Builds `libgdino_common.so`, `libnvds_gdino_preprocess.so`, and `libnvds_gdino_parser.so`
-into `build/`. The DeepStream samples image has no `nvcc`, so the script installs it into
-the container the first time (needs internet that once).
-
-### 2. Pack the ONNX
-```bash
-./scripts/02_make_onnx.sh model/.../grounding_dino_swin_tiny_commercial_deployable.onnx
-```
-Produces `onnx/gdino_single_input.onnx` — the same model with one `packed` input and an
-in-graph preamble that splits it back into the original six. Keeps a dynamic batch dim.
-
-### 3. Build the TensorRT engine
-```bash
-./scripts/03_build_engine.sh
-```
-Builds `onnx/gdino_single_input_fp16.engine` (FP16, dynamic batch). Takes ~2 minutes;
-cached afterwards.
-
-### 4. Build the app
-```bash
-./scripts/04_build_app.sh
-```
-Compiles `app/gdino_app.cpp` (our own GStreamer app) to `build/gdino-app`. No NVIDIA sample
-source is required — the app is self-contained in this repo.
-
-### 5. Run
-```bash
-./scripts/run.sh "car, man"                                   # bundled sample video → MP4
-./scripts/run.sh "dog, bicycle" file:///path/to/video.mp4 out.mp4
-```
-With no video argument it uses the H.264 sample stream shipped in the DeepStream container
-(decoded by NVDEC). Press **Ctrl+C** to stop cleanly.
-
 ---
 
 ## Changing what it detects, live
 
-This is the point of the project. While a run is going, write new words to the control file
-**from the host** in another terminal — the next frame is detected against them, no restart:
+While a run is going, write new words to the control file from the host in another terminal.
+The next frame is detected against them, with no restart:
 
 ```bash
-echo "person, backpack, traffic light" > /tmp/gdino_prompt
+echo "dog . tree ." > /tmp/gdino_prompt
 ```
 
-(`run.sh` shares `/tmp/gdino_prompt` between the host and the container as a named pipe, so a
-plain `echo` from your host reaches the running pipeline.)
-
-`run.sh`'s 4th argument demonstrates this automatically by switching partway through:
+`run.sh` shares `/tmp/gdino_prompt` between the host and the container as a named pipe, so a
+plain `echo` from the host reaches the running pipeline. This works the same for both models.
+The `--switch` flag demonstrates it automatically, switching once frames are flowing:
 ```bash
-./scripts/run.sh "car, man" "" demo.mp4 "bus, bicycle"        # switches ~7s in
+./scripts/run.sh --video file:///workspace/data/dog_park.mp4 --switch "dog . tree ." "dog . person ."
 ```
+
+Prompts use phrases separated by `.` or `,` (e.g. `"dog . person ."` or `"dog, person"`).
 
 ---
 
@@ -241,12 +232,12 @@ Key settings in [`configs/config_preprocess_gdino.txt`](configs/config_preproces
 
 | Property | Value | Why |
 |---|---|---|
-| `network-input-order` | `2` | CUSTOM — our lib owns the packed-tensor layout |
+| `network-input-order` | `2` | CUSTOM — the preprocess lib owns the packed-tensor layout |
 | `network-input-shape` | `1;1633280;1;1` | the flat `packed` tensor (image + 5 text tensors) |
 | `processing-width/height` | `960` / `544` | the model's fixed input resolution |
 | `maintain-aspect-ratio` | `0` | stretch to fill, matching the model's export |
-| `draw-roi` | `0` | off — otherwise nvdspreprocess draws a green frame border |
-| `[user-configs] prompt` | `car . man .` | initial prompt (overridden per run by the scripts) |
+| `[user-configs] model-variant` | `@@VARIANT@@` | `tao` or `gdino_b` — packed text-tensor order (set by `run.sh` from `--model`) |
+| `[user-configs] prompt` | `car . person .` | initial prompt (overridden per run by the scripts) |
 | `[user-configs] mean / std` | ImageNet | per-channel normalization the model expects |
 | `[user-configs] fifo-path` | `/tmp/gdino_prompt` | the live-prompt control file |
 
@@ -254,36 +245,72 @@ Key settings in [`configs/config_infer_gdino.txt`](configs/config_infer_gdino.tx
 
 | Property | Value | Why |
 |---|---|---|
-| `network-type` | `0` | detector path — nvinfer calls our bbox parser |
-| `cluster-mode` | `4` | no DeepStream clustering — our parser does its own NMS |
-| `parse-bbox-func-name` | `NvDsInferParseCustomGDINO` | our custom parser |
-| `model-engine-file` | `…/gdino_single_input_fp16.engine` | the dynamic-batch FP16 engine |
+| `network-type` | `0` | detector path — nvinfer calls the bbox parser |
+| `cluster-mode` | `4` | no DeepStream clustering — the custom parser does its own NMS |
+| `parse-bbox-func-name` | `NvDsInferParseCustomGDINO` | the custom parser |
+| `model-engine-file` | `@@ENGINE@@` → `onnx/<MODEL>.engine` | the dynamic-batch engine (filled by `run.sh`) |
 | `gie-unique-id` | `1` | must equal the preprocess `target-unique-ids` |
 
-Detection threshold is the `GDINO_THR` environment variable (default `0.25`), read by the parser.
+Detection threshold is the `--thr` flag of `run.sh` (default `0.3`).
+
+---
+
+## Customization reference
+
+
+**Model & engine** (setup scripts)
+| Want to… | Flag |
+|---|---|
+| Choose the model | `--model tao` \| `--model gdino_b` (on `00`/`02`/`03`/`run.sh`) |
+| Choose precision | `./scripts/03_build_engine.sh --model M --precision fp32\|fp16\|bf16` |
+| Use your own GDINO ONNX | `./scripts/02_make_onnx.sh --onnx path.onnx --model M` (input names auto-detect the variant) |
+
+**What/how it detects (no rebuild — flags to `run.sh`)**
+| Knob | Flag | Default | Effect |
+|---|---|---|---|
+| Prompt (start) | positional arg | `dog . person .` | initial classes |
+| Prompt (live) | `echo "…" > /tmp/gdino_prompt` | — | change classes mid-stream, no restart |
+| Score threshold | `--thr` | `0.30` | lower = more (weaker) boxes |
+| NMS IoU | `--nms-iou` | `0.50` | overlap to suppress; `<=0` disables NMS |
+| Whole-image filter | `--max-area` | `0.92` | drop boxes bigger than this frac; `>=1` disables |
+
+**Output video (no rebuild — flags to `run.sh`)**
+| Knob | Flag | Default |
+|---|---|---|
+| Output WxH | `--out-w` / `--out-h` | 1280×720 |
+| H.264 bitrate | `--bitrate` | encoder default |
+| Sink / output | `--sink ELEM` (e.g. `fakesink`) · `--out FILE` (MP4) · `--live` (window) | MP4 |
+| Log detections | `--log` | off |
 
 ---
 
 ## Use your own input video
 
 ```bash
-./scripts/run.sh "car, man" file:///path/to/your_video.mp4 out.mp4
+./scripts/run.sh --video file:///workspace/data/your_video.mp4 --out out.mp4 "car . person ."
 ```
-Put the file anywhere under the repo (it's mounted at `/work` in the container, so a file in
-`data/` is `file:///work/data/your_video.mp4`). For an RTSP camera, pass
-`rtsp://user:pass@host:554/stream` as the URI.
+Put the file anywhere under the repo. It is mounted at `/workspace` in the container, so a file in
+`data/` is `file:///workspace/data/your_video.mp4`. For an RTSP camera, pass
+`--video rtsp://user:pass@host:554/stream`.
 
-### Sample video
+### Demo clips
 
-`run.sh` already defaults to a street-scene sample (`sample_720p.mp4`) that ships **inside**
-the DeepStream image, so `./scripts/run.sh "car, man"` just works with no input file.
+`./scripts/get_test_videos.sh` downloads two short clips into `data/`:
 
-To pull that sample out to a local `data/` file, use the following command:
+| file | prompt | scene |
+|---|---|---|
+| `data/dog_park.mp4` | `dog . person . ball` | a dog and its owner in a park |
+| `data/tomatoes.mp4` | `tomato . hand .` | hands washing tomatoes in a bowl |
 
 ```bash
 ./scripts/get_test_videos.sh
-./scripts/run.sh "car, person, bus, traffic light" file:///work/data/sample_720p.mp4 out/sample.mp4
+./scripts/run.sh --video file:///workspace/data/dog_park.mp4 "dog . person . ball"
+./scripts/run.sh --video file:///workspace/data/tomatoes.mp4 "tomato . hand ."
 ```
+
+Both files are gitignored; re-fetch them any time with `get_test_videos.sh`. When `--video`
+is omitted, `run.sh` uses `data/dog_park.mp4`. The clips are from
+[Pexels](https://www.pexels.com/license/) (free to use, no attribution required).
 
 ---
 
@@ -293,7 +320,7 @@ To pull that sample out to a local `data/` file, use the following command:
 — it passes your X display and the GPU render node into the container:
 
 ```bash
-./scripts/run.sh --live "car, man"
+./scripts/run.sh --live --video file:///workspace/data/dog_park.mp4 "dog . person . ball"
 ```
 
 Requires an **X11 desktop session** (`echo $DISPLAY` is set). On Wayland, log into an
@@ -306,8 +333,8 @@ X access via `xhost +local:root` and adds `--device /dev/dri`.
 
 ```bash
 docker run --gpus all -it --rm \
-  -v "$PWD":/work -w /work \
-  -e LD_LIBRARY_PATH=/opt/nvidia/deepstream/deepstream/lib:/work/build \
+  -v "$PWD":/workspace -w /workspace \
+  -e LD_LIBRARY_PATH=/opt/nvidia/deepstream/deepstream/lib:/workspace/build \
   nvcr.io/nvidia/deepstream:9.0-samples-multiarch bash
 ```
 

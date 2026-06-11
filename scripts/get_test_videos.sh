@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
-# Copy a sample video out of the DeepStream image into data/ (no external
-# download — these ship inside the container). sample_720p.mp4 is a street scene
-# with cars and people; run.sh also uses it by default.
+# Download the two demo clips into data/ (gitignored, re-fetched any time):
+#   data/dog_park.mp4  — a dog and its owner in a park   (prompt: "dog . person .")
+#   data/tomatoes.mp4  — hands washing tomatoes in a bowl (prompt: "tomato . hand .")
+# Both are short Pexels clips with distinct, well-separated objects.
 set -e
 cd "$(dirname "$0")/.."
-IMAGE=${IMAGE:-nvcr.io/nvidia/deepstream:9.0-samples-multiarch}
 mkdir -p data
-docker run --rm -v "$PWD/data":/out "$IMAGE" \
-  bash -lc 'cp /opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4 /out/'
-echo "done:"; ls -lh data/*.mp4
+
+fetch() {  # name  url
+  local out="data/$1"
+  [ -s "$out" ] && { echo "have $out"; return; }
+  echo "downloading $out ..."
+  curl -fL -A "Mozilla/5.0" -o "$out" "$2"
+}
+
+fetch dog_park.mp4 "${GDINO_DOG_URL:-https://www.pexels.com/download/video/3191251/}"
+fetch tomatoes.mp4 "${GDINO_TOMATO_URL:-https://www.pexels.com/download/video/5945027/}"
+
+ls -lh data/dog_park.mp4 data/tomatoes.mp4
 echo
-echo "run:  ./scripts/run.sh \"car, man\" file:///work/data/sample_720p.mp4 out/sample.mp4"
-echo "(other clips live in /opt/nvidia/deepstream/deepstream/samples/streams/ inside the image)"
+echo "run:  ./scripts/run.sh --video file:///workspace/data/dog_park.mp4 \"dog . person .\""
+echo "      ./scripts/run.sh --video file:///workspace/data/tomatoes.mp4 \"tomato . hand .\""

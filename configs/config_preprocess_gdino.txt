@@ -5,7 +5,7 @@
 enable=1
 # must equal nvinfer gie-unique-id so the tensor is routed to it
 target-unique-ids=1
-# 2 = CUSTOM input order (our lib owns the layout)
+# 2 = CUSTOM input order (the custom lib owns the layout)
 network-input-order=2
 unique-id=5
 gpu-id=0
@@ -32,7 +32,9 @@ custom-tensor-preparation-function=CustomTensorPreparation
 
 [user-configs]
 vocab-path=@@ROOT@@/assets/vocab.txt
-prompt=car . man .
+# tao | gdino_b — selects the packed text-tensor order (must match the engine)
+model-variant=@@VARIANT@@
+prompt=car . person .
 fifo-path=/tmp/gdino_prompt
 mean=0.485,0.456,0.406
 std=0.229,0.224,0.225

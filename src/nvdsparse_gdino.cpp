@@ -9,11 +9,13 @@
 #include <cstring>
 #include <cstdlib>
 
-// detection threshold: GDINO_THR env (default 0.25). GDINO confidences are
-// low-calibrated; weak phrases like "man"/"pedestrian" need ~0.25.
-static float boxThreshold() {
-  const char* e = getenv("GDINO_THR");
-  return e ? (float)atof(e) : 0.25f;
+// Tunable decode knobs, all via env (read once, cached):
+//   GDINO_THR      min detection score          (default 0.30)
+//   GDINO_NMS_IOU  class-agnostic NMS IoU; <=0 disables NMS   (default 0.50)
+//   GDINO_MAX_AREA drop boxes with normalized area > this; >=1 disables (default 0.92)
+static float envf(const char* k, float def) {
+  const char* e = getenv(k);
+  return e ? (float)atof(e) : def;
 }
 
 extern "C" bool NvDsInferParseCustomGDINO(
@@ -43,10 +45,12 @@ extern "C" bool NvDsInferParseCustomGDINO(
   auto snap = gdino::PromptStore::instance().current();
   if (!snap) return true;
 
-  float thr = boxThreshold();
+  static const float thr      = envf("GDINO_THR", 0.30f);
+  static const float nms_iou  = envf("GDINO_NMS_IOU", 0.50f);
+  static const float max_area = envf("GDINO_MAX_AREA", 0.92f);
   std::vector<gdino::Detection> dets;
-  gdino::decodeGDINO(logits, Q, T, boxes, *snap, thr, thr,
-                     gdino::IMG_W, gdino::IMG_H, dets);  // boxes in 960x544
+  gdino::decodeGDINO(logits, Q, T, boxes, *snap, thr, nms_iou, max_area,
+                     gdino::IMG_W, gdino::IMG_H, dets);  // boxes in IMG_W x IMG_H
   for (auto& d : dets) {
     NvDsInferObjectDetectionInfo o;
     memset(&o, 0, sizeof(o));
