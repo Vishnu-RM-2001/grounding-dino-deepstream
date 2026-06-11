@@ -3,8 +3,8 @@ gdino-ds9-livetext — third-party components and licensing
 
 The MIT license in LICENSE covers ONLY the source in this repository (the GDINO
 plugin libraries under src/, the ONNX surgery script, the configs, scripts, and
-the sample-app integrator). It does NOT cover the third-party components below,
-which you obtain yourself and which carry their own licenses.
+the DeepStream application in app/). It does NOT cover the third-party components
+below, which you obtain yourself and which carry their own licenses.
 
 1a. Grounding-DINO model — --model tao (Swin-Tiny, commercial deployable)
    Source : NVIDIA NGC / TAO
@@ -19,23 +19,24 @@ which you obtain yourself and which carry their own licenses.
    exported to ONNX locally (export/export_onnx.py). Not redistributed here.
    The export also downloads bert-base-uncased from Hugging Face at export time.
 
-2. DeepStream SDK and the `deepstream-preprocess-test` sample app
+2. DeepStream SDK
    Source : NVIDIA DeepStream 9.0 container / SDK.
    License : NVIDIA proprietary (LicenseRef-NvidiaProprietary).
+   The application (app/gdino_app.cpp) is this repository's own MIT code; it links
+   against the DeepStream SDK at build and run time inside the NVIDIA container.
    This repo does NOT include or redistribute any DeepStream/NVIDIA source.
-   app/integrate_sample_app.py reads the sample from YOUR installed DeepStream
-   tree and applies edits locally at build time. The NVIDIA sample source never
-   enters this repository.
 
 3. BERT vocabulary (assets/vocab.txt)
    The standard `bert-base-uncased` WordPiece vocabulary (Apache-2.0, Google /
    Hugging Face). Used by the tokenizer to match the model's text encoder.
 
-4. Demo sample clip (data/sample.mp4)
-   Source : Roboflow supervision video-examples (people-walking.mp4)
-            https://media.roboflow.com/supervision/video-examples/people-walking.mp4
-   Downloaded by scripts/get_test_videos.sh; NOT committed (data/ is gitignored).
-   The hero image assets/demo_gdino.jpg is a frame from this clip annotated by the
-   model. Used here only for demonstration.
+4. Demo clips (data/dog_park.mp4, data/tomatoes.mp4)
+   Source  : Pexels — video IDs 3191251 (a dog in a park) and 5945027 (washing
+             tomatoes), fetched by scripts/get_test_videos.sh.
+   License : Pexels License (https://www.pexels.com/license/) — free for commercial
+             and non-commercial use, modification allowed, attribution not required.
+   The clips are NOT committed (data/ is gitignored). The hero image
+   assets/demo_gdino.jpg is a frame from the tomatoes clip with the model's
+   detections drawn on it, included only for demonstration.
 
 You are responsible for complying with each component's license.
