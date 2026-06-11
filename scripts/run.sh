@@ -2,10 +2,9 @@
 # Run the pipeline. Saves an annotated MP4 by default; --live shows a window.
 #   ./scripts/run.sh [flags] "<prompt>"
 # Flags:
-#   --model tao|gdino_b   model (default tao)
+#   --model tao|gdino_b   model (default gdino_b)
 #   --live                 EGL/X11 window instead of saving an MP4 (needs a desktop)
-#   --video URI            input (default: data/sample.mp4 from get_test_videos.sh, else
-#                          the in-container clip; accepts file:// or rtsp://)
+#   --video URI            input (default: data/dog_park.mp4; accepts file:// or rtsp://)
 #   --out FILE             output MP4 (default out/gdino_<model>.mp4; ignored with --live)
 #   --switch "<prompt>"    demo a live prompt change once frames are flowing
 #   --thr F                detection score threshold (default 0.3)
@@ -21,7 +20,7 @@ set -e
 cd "$(dirname "$0")/.."
 IMAGE=${IMAGE:-nvcr.io/nvidia/deepstream:9.0-samples-multiarch}
 
-MODEL=tao; LIVE=0; LOG=0
+MODEL=gdino_b; LIVE=0; LOG=0
 VIDEO=""
 OUT=""; SWITCH=""; THR=0.3; NMS_IOU=""; MAX_AREA=""
 OUT_W=""; OUT_H=""; BITRATE=""; SINK=""; PROMPT=""
@@ -43,13 +42,13 @@ while [ $# -gt 0 ]; do case "$1" in
   -*)         echo "unknown flag: $1 (see --help)"; exit 1;;
   *)          PROMPT="$1"; shift;;
 esac; done
-PROMPT=${PROMPT:-person . backpack . handbag .}
+PROMPT=${PROMPT:-dog . person .}
 OUT=${OUT:-out/gdino_${MODEL}.mp4}
 ENGINE=onnx/${MODEL}.engine
-# default input: the downloaded GDINO sample if present, else the in-container clip
+# default input: the dog clip from get_test_videos.sh (mounted at /workspace in the container)
 if [ -z "$VIDEO" ]; then
-  if [ -f data/sample.mp4 ]; then VIDEO=file:///work/data/sample.mp4
-  else VIDEO=file:///opt/nvidia/deepstream/deepstream/samples/streams/sample_720p.mp4; fi
+  if [ -f data/dog_park.mp4 ]; then VIDEO=file:///workspace/data/dog_park.mp4
+  else echo "ERROR: no --video given and data/dog_park.mp4 missing — run ./scripts/get_test_videos.sh"; exit 1; fi
 fi
 
 [ -x build/gdino-app ] || { echo "ERROR: app missing — run ./scripts/04_build_app.sh"; exit 1; }
@@ -74,7 +73,7 @@ elif [ -n "$SINK" ]; then
   echo "prompt: '$PROMPT'${SWITCH:+   (live switch -> '$SWITCH')}   sink=$SINK"
 else
   mkdir -p "$(dirname "$OUT")"
-  APP_ARGS="--out /work/$OUT"
+  APP_ARGS="--out /workspace/$OUT"
   echo "prompt: '$PROMPT'${SWITCH:+   (live switch -> '$SWITCH')}   thr=$THR  -> $OUT"
 fi
 [ -n "$OUT_W" ]   && APP_ARGS="$APP_ARGS --out-w $OUT_W"
@@ -86,12 +85,12 @@ fi
 INNER='
   set -e
   export USE_NEW_NVSTREAMMUX=no
-  export LD_LIBRARY_PATH=/opt/nvidia/deepstream/deepstream/lib:/work/build:/usr/local/cuda-13.1/targets/x86_64-linux/lib:$LD_LIBRARY_PATH
+  export LD_LIBRARY_PATH=/opt/nvidia/deepstream/deepstream/lib:/workspace/build:/usr/local/cuda-13.1/targets/x86_64-linux/lib:$LD_LIBRARY_PATH
   export GST_PLUGIN_PATH=/opt/nvidia/deepstream/deepstream/lib/gst-plugins
   rm -rf ~/.cache/gstreamer-1.0
-  sed -e "s#@@ROOT@@#/work#g" -e "s#@@VARIANT@@#$GDINO_MODEL#g" configs/config_preprocess_gdino.txt | \
+  sed -e "s#@@ROOT@@#/workspace#g" -e "s#@@VARIANT@@#$GDINO_MODEL#g" configs/config_preprocess_gdino.txt | \
     sed "s#^prompt=.*#prompt=$GDINO_PROMPT#" > /tmp/pre.txt
-  sed -e "s#@@ROOT@@#/work#g" -e "s#@@ENGINE@@#/work/onnx/$GDINO_MODEL.engine#g" configs/config_infer_gdino.txt > /tmp/inf.txt
+  sed -e "s#@@ROOT@@#/workspace#g" -e "s#@@ENGINE@@#/workspace/onnx/$GDINO_MODEL.engine#g" configs/config_infer_gdino.txt > /tmp/inf.txt
   exec ./build/gdino-app $GDINO_APP_ARGS /tmp/pre.txt /tmp/inf.txt "$GDINO_VIDEO"
 '
 
@@ -109,7 +108,7 @@ docker run --rm --gpus all -e NVIDIA_DRIVER_CAPABILITIES=all \
   -e GDINO_APP_ARGS="$APP_ARGS" -e GDINO_THR="$THR" \
   ${NMS_IOU:+-e GDINO_NMS_IOU="$NMS_IOU"} ${MAX_AREA:+-e GDINO_MAX_AREA="$MAX_AREA"} \
   -v "$FIFO":/tmp/gdino_prompt \
-  "${EXTRA[@]}" -v "$PWD":/work -w /work "$IMAGE" bash -lc "$INNER" 2>&1 \
+  "${EXTRA[@]}" -v "$PWD":/workspace -w /workspace "$IMAGE" bash -lc "$INNER" 2>&1 \
   | tee "$LOGF" \
   | { if [ "$LIVE" = 1 ]; then cat; \
       else grep --line-buffered -E "PERF:|live switch|End of stream|\[gdino\]|ERROR|frame=0 "; fi; }

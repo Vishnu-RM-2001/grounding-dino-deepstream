@@ -10,6 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-WORKDIR /work
+WORKDIR /workspace
 ENV PYTHONUNBUFFERED=1
-ENV HF_HOME=/work/.hf_cache
+ENV HF_HOME=/workspace/.hf_cache

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the dynamic-batch TensorRT engine for the selected MODEL.
-#   MODEL=tao|gdino_b   (default tao)   reads onnx/<MODEL>_packed.onnx
+#   MODEL=tao|gdino_b   (default gdino_b)   reads onnx/<MODEL>_packed.onnx
 #   PRECISION=fp32|fp16|bf16  (default fp32 = max accuracy)
 #
 # Precision notes (verified on this model family):
@@ -12,7 +12,7 @@ set -e
 cd "$(dirname "$0")/.."
 IMAGE=${IMAGE:-nvcr.io/nvidia/deepstream:9.0-samples-multiarch}
 # --model tao|gdino_b ; --precision fp32|fp16|bf16  (env MODEL/PRECISION are fallbacks)
-MODEL=${MODEL:-tao}
+MODEL=${MODEL:-gdino_b}
 PRECISION=${PRECISION:-fp32}
 while [ $# -gt 0 ]; do case "$1" in
   --model) MODEL="$2"; shift 2;;
@@ -35,13 +35,13 @@ esac
 echo "building $MODEL engine ($PRECISION) -> $ENGINE"
 
 docker run --rm --gpus all -e NVIDIA_DRIVER_CAPABILITIES=all \
-  -v "$PWD":/work -w /work "$IMAGE" bash -lc "
+  -v "$PWD":/workspace -w /workspace "$IMAGE" bash -lc "
   set -e
-  /usr/src/tensorrt/bin/trtexec --onnx=/work/$PACKED $FLAG \
+  /usr/src/tensorrt/bin/trtexec --onnx=/workspace/$PACKED $FLAG \
     --minShapes=packed:1x1633280x1x1 \
     --optShapes=packed:1x1633280x1x1 \
     --maxShapes=packed:2x1633280x1x1 \
     --memPoolSize=workspace:4096 \
-    --saveEngine=/work/$ENGINE
-  ls -lh /work/$ENGINE
+    --saveEngine=/workspace/$ENGINE
+  ls -lh /workspace/$ENGINE
 "

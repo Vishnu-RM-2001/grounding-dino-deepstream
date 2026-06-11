@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Fetch the model assets for the selected variant.
-#   MODEL=tao       (default) NVIDIA TAO Grounding-DINO Swin-Tiny commercial-deployable
-#                   ONNX from NGC (anonymous download).
-#   MODEL=gdino_b  IDEA-Research GroundingDINO: clone the repo, download the
+#   MODEL=gdino_b  (default) IDEA-Research GroundingDINO: clone the repo, download the
 #                   SwinT-OGC .pth, and build the CPU export image (gdino-export).
+#   MODEL=tao       NVIDIA TAO Grounding-DINO Swin-Tiny commercial-deployable
+#                   ONNX from NGC (anonymous download).
 set -e
 cd "$(dirname "$0")/.."
 # --model tao|gdino_b  (env MODEL is the fallback default)
-MODEL=${MODEL:-tao}
+MODEL=${MODEL:-gdino_b}
 while [ $# -gt 0 ]; do case "$1" in
   --model) MODEL="$2"; shift 2;;
   --model=*) MODEL="${1#*=}"; shift;;
