@@ -177,7 +177,7 @@ M=gdino_b                   # or: M=tao  (just a shell var for the examples)
 
 Switch model and clip with the same flags:
 ```bash
-./scripts/run.sh --model gdino_b --video file:///workspace/data/dog_park.mp4 "dog . person ."
+./scripts/run.sh --model gdino_b --video file:///workspace/data/dog_park.mp4 "dog . person . ball"
 ./scripts/run.sh --model tao     --video file:///workspace/data/tomatoes.mp4 "tomato . hand ."
 ```
 
@@ -204,9 +204,6 @@ export uses pure-PyTorch ops — so the **FP32 engine is the accuracy reference*
 ```bash
 ./scripts/03_build_engine.sh --model tao --precision fp16    # faster, lower recall
 ```
-FP32 reproduces the model exactly through the whole pipeline. FP16/BF16 trade accuracy for
-speed differently per model — see `verify/verify_tao.py`.
-
 ---
 
 ## Changing what it detects, live
@@ -302,7 +299,7 @@ Put the file anywhere under the repo. It is mounted at `/workspace` in the conta
 
 | file | prompt | scene |
 |---|---|---|
-| `data/dog_park.mp4` | `dog . person .` | a dog and its owner in a park |
+| `data/dog_park.mp4` | `dog . person . ball` | a dog and its owner in a park |
 | `data/tomatoes.mp4` | `tomato . hand .` | hands washing tomatoes in a bowl |
 
 ```bash
